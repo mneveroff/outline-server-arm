@@ -1,57 +1,49 @@
-# Outline Server
+# Outline Server for ARM
 
-![Build and Test](https://github.com/Jigsaw-Code/outline-server/actions/workflows/build_and_test_debug.yml/badge.svg?branch=master) [![Mattermost](https://badgen.net/badge/Mattermost/Outline%20Community/blue)](https://community.internetfreedomfestival.org/community/channels/outline-community) [![Reddit](https://badgen.net/badge/Reddit/r%2Foutlinevpn/orange)](https://www.reddit.com/r/outlinevpn/)
+This is a fork of the [Outline Server](https://github.com/Jigsaw-Code/outline-server) created to provide a Docker image for ARM64/aarch64 architecture, answering the question of how to run Outline Server on Raspberry Pi, Odroid, or any other ARM64 device.
 
-Outline Server is the component that provides the Shadowsocks service (via [outline-ss-server](https://github.com/Jigsaw-Code/outline-ss-server/)) and a service management API. You can deploy this server directly following simple instructions in this repository, or if you prefer a ready-to-use graphical interface you can use the [Outline Manager](https://github.com/Jigsaw-Code/outline-apps/).
+For some reason, [the official Outline Server Docker image](https://quay.io/repository/outline/shadowbox?tab=tags) is only available for x86_64, even though Outline Server build process [has been upgraded to support aarch64/arm64](https://github.com/Jigsaw-Code/outline-server/pull/1399).
 
-**Components:**
-
-- **Outline Server** ([`src/shadowbox`](src/shadowbox)): The core proxy server that runs and manages [outline-ss-server](https://github.com/Jigsaw-Code/outline-ss-server/), a Shadowsocks backend. It provides a REST API for access key management.
-
-- **Metrics Server** ([`src/metrics_server`](src/metrics_server)): A REST service for optional, anonymous metrics sharing.
-
-**Join the Outline Community** by signing up for the [IFF Mattermost](https://wiki.digitalrights.community/index.php?title=IFF_Mattermost)!
-
-## Shadowsocks and Anti-Censorship
-
-Outline's use of Shadowsocks means it benefits from ongoing improvements that strengthen its resistance against detection and blocking.
-
-**Key Protections:**
-
-- **AEAD ciphers** are mandatory.
-- **Probing resistance** mitigates detection techniques.
-- **Protection against replayed data.**
-- **Variable packet sizes** to hinder identification.
-
-See [Shadowsocks resistance against detection and blocking](docs/shadowsocks.md).
+```{tip}
+For all intents and purposes, I've no affiliation with Jigsaw or Outline. I don't assume any liability for the use of this image, it's produced "as is" and so on. All right reserved to Jigsaw and Outline's team.
+```
 
 ## Installation
 
-**Prerequisites**
+Instead of the default installation command, run:
 
-- [Node](https://nodejs.org/en/download/) LTS (`lts/hydrogen`, version `18.16.0`)
-- [NPM](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) (version `9.5.1`)
-- [Go](https://go.dev/dl/) 1.21+
+```bash
+sudo bash -c "SB_IMAGE=mneveroff/outline-server-arm:latest $(wget -qO- https://raw.githubusercontent.com/MNeverOff/outline-server-arm/master/src/server_manager/install_scripts/install_server.sh)"
+```
 
-1. **Install dependencies**
+You should see Watchtower and Outline Server containers running on your machine:
 
-   ```sh
-   npm install
-   ```
+## Build from source
 
-1. **Start the server**
+If you aren't trusting of 3rd party Docker Hub images and shell scripts hosted on the internet (as you should be), or if I've fallen behind in maintaining this, you can build it from source:
 
-   ```sh
-   ./task shadowbox:start
-   ```
+```bash
+task shadowbox:docker:build TARGET_ARCH=arm64 VERSION=1.9.0 IMAGE_NAME=mneveroff/outline-server-arm
+```
 
-   Exploring further options:
+Above, replace the `VERSION` and `IMAGE_NAME` accordingly, and push to Docker Hub if convenient.
 
-   - **Refer to the README:** Find additional configuration and usage options in the core server's [`README`](src/shadowbox/README.md).
-   - **Learn about the build system:** For in-depth build system information, consult the [contributing guide](CONTRIBUTING.md).
+Within the [install_script.sh](src/server_manager/install_scripts/install_server.sh) script, replace:
 
-1. **To clean up**
+```bash
+  if [[ "${MACHINE_TYPE}" != "x86_64" ]]; then
+    log_error "Unsupported machine type: ${MACHINE_TYPE}. Please run this script on a x86_64 machine"
+    exit 1
+  fi
+```
 
-   ```sh
-   ./task clean
-   ```
+with
+
+```bash
+  if [[ "${MACHINE_TYPE}" != "x86_64" && "${MACHINE_TYPE}" != "aarch64" ]]; then
+    log_error "Unsupported machine type: ${MACHINE_TYPE}. Please run this script on an x86_64 or aarch64 machine"
+    exit 1
+  fi
+```
+
+Or comment it out entirely, your choice.
