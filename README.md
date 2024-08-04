@@ -1,5 +1,8 @@
 # Outline Server for ARM
 
+![Docker Image Version (latest by date)](https://img.shields.io/docker/v/mneveroff/outline-server-arm)
+![Docker Pulls](https://img.shields.io/docker/pulls/mneveroff/outline-server-arm)
+
 This is a fork of the [Outline Server](https://github.com/Jigsaw-Code/outline-server) created to provide a Docker image for ARM64/aarch64 architecture, answering the question of how to run Outline Server on Raspberry Pi, Odroid, or any other ARM64 device.
 
 For some reason, [the official Outline Server Docker image](https://quay.io/repository/outline/shadowbox?tab=tags) is only available for x86_64, even though Outline Server build process [has been upgraded to support aarch64/arm64](https://github.com/Jigsaw-Code/outline-server/pull/1399).
