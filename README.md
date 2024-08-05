@@ -21,6 +21,8 @@ sudo bash -c "SB_IMAGE=mneveroff/outline-server-arm:latest $(wget -qO- https://r
 
 You should see Watchtower and Outline Server containers running on your machine:
 
+![Example console output after running the command indicating successful install](docs/install.png)
+
 ## Build from source
 
 If you aren't trusting of 3rd party Docker Hub images and shell scripts hosted on the internet (as you should be), or if I've fallen behind in maintaining this, you can build it from source:
