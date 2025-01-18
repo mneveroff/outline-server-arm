@@ -31,7 +31,14 @@ If you aren't trusting of 3rd party Docker Hub images and shell scripts hosted o
 task shadowbox:docker:build TARGET_ARCH=arm64 VERSION=1.9.0 IMAGE_NAME=mneveroff/outline-server-arm
 ```
 
-Above, replace the `VERSION` and `IMAGE_NAME` accordingly, and push to Docker Hub if convenient.
+Above, replace the `VERSION` and `IMAGE_NAME` accordingly, and push to Docker Hub if convenient:
+
+```bash
+docker tag mneveroff/outline-server-arm mneveroff/outline-server-arm:VERSION
+docker push mneveroff/outline-server-arm:VERSION
+docker tag mneveroff/outline-server-arm mneveroff/outline-server-arm:latest
+docker push mneveroff/outline-server-arm:latest
+```
 
 Within the [install_script.sh](src/server_manager/install_scripts/install_server.sh) script, replace:
 
