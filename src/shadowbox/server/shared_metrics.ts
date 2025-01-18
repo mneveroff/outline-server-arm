@@ -16,7 +16,7 @@ import {Clock} from '../infrastructure/clock';
 import * as follow_redirects from '../infrastructure/follow_redirects';
 import {JsonConfig} from '../infrastructure/json_config';
 import * as logging from '../infrastructure/logging';
-import {PrometheusClient} from '../infrastructure/prometheus_scraper';
+import {PrometheusClient, QueryResultData} from '../infrastructure/prometheus_scraper';
 import * as version from './version';
 import {AccessKeyConfigJson} from './server_access_key';
 
@@ -26,9 +26,11 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 const MS_PER_DAY = 24 * MS_PER_HOUR;
 const SANCTIONED_COUNTRIES = new Set(['CU', 'KP', 'SY']);
 
-export interface CountryUsage {
+export interface ReportedUsage {
   country: string;
+  asn?: number;
   inboundBytes: number;
+  tunnelTimeSec: number;
 }
 
 // JSON format for the published report.
@@ -44,7 +46,9 @@ export interface HourlyServerMetricsReportJson {
 // Field renames will break backwards-compatibility.
 export interface HourlyUserMetricsReportJson {
   countries: string[];
+  asn?: number;
   bytesTransferred: number;
+  tunnelTimeSec: number;
 }
 
 // JSON format for the feature metrics report.
@@ -70,7 +74,7 @@ export interface SharedMetricsPublisher {
 }
 
 export interface UsageMetrics {
-  getCountryUsage(): Promise<CountryUsage[]>;
+  getReportedUsage(): Promise<ReportedUsage[]>;
   reset();
 }
 
@@ -80,19 +84,48 @@ export class PrometheusUsageMetrics implements UsageMetrics {
 
   constructor(private prometheusClient: PrometheusClient) {}
 
-  async getCountryUsage(): Promise<CountryUsage[]> {
+  async getReportedUsage(): Promise<ReportedUsage[]> {
     const timeDeltaSecs = Math.round((Date.now() - this.resetTimeMs) / 1000);
-    // We measure the traffic to and from the target, since that's what we are protecting.
-    const result = await this.prometheusClient.query(
-      `sum(increase(shadowsocks_data_bytes_per_location{dir=~"p>t|p<t"}[${timeDeltaSecs}s])) by (location)`
+
+    const usage = new Map<string, ReportedUsage>();
+    const processResults = (
+      data: QueryResultData,
+      setValue: (entry: ReportedUsage, value: string) => void
+    ) => {
+      for (const result of data.result) {
+        const country = result.metric['location'] || '';
+        const asn = result.metric['asn'] ? Number(result.metric['asn']) : undefined;
+        const key = `${country}-${asn}`;
+        const entry = usage.get(key) || {
+          country,
+          asn,
+          inboundBytes: 0,
+          tunnelTimeSec: 0,
+        };
+        setValue(entry, result.value[1]);
+        if (!usage.has(key)) {
+          usage.set(key, entry);
+        }
+      }
+    };
+
+    // Query and process inbound data bytes by country+ASN.
+    const dataBytesQueryResponse = await this.prometheusClient.query(
+      `sum(increase(shadowsocks_data_bytes_per_location{dir=~"p>t|p<t"}[${timeDeltaSecs}s])) by (location, asn)`
     );
-    const usage = [] as CountryUsage[];
-    for (const entry of result.result) {
-      const country = entry.metric['location'] || '';
-      const inboundBytes = Math.round(parseFloat(entry.value[1]));
-      usage.push({country, inboundBytes});
-    }
-    return usage;
+    processResults(dataBytesQueryResponse, (entry, value) => {
+      entry.inboundBytes = Math.round(parseFloat(value));
+    });
+
+    // Query and process tunneltime by country+ASN.
+    const tunnelTimeQueryResponse = await this.prometheusClient.query(
+      `sum(increase(shadowsocks_tunnel_time_seconds_per_location[${timeDeltaSecs}s])) by (location, asn)`
+    );
+    processResults(tunnelTimeQueryResponse, (entry, value) => {
+      entry.tunnelTimeSec = Math.round(parseFloat(value));
+    });
+
+    return Array.from(usage.values());
   }
 
   reset() {
@@ -105,7 +138,7 @@ export interface MetricsCollectorClient {
   collectFeatureMetrics(reportJson: DailyFeatureMetricsReportJson): Promise<void>;
 }
 
-export class RestMetricsCollectorClient {
+export class RestMetricsCollectorClient implements MetricsCollectorClient {
   constructor(private serviceUrl: string) {}
 
   collectServerUsageMetrics(reportJson: HourlyServerMetricsReportJson): Promise<void> {
@@ -163,7 +196,7 @@ export class OutlineSharedMetricsPublisher implements SharedMetricsPublisher {
         return;
       }
       try {
-        await this.reportServerUsageMetrics(await usageMetrics.getCountryUsage());
+        await this.reportServerUsageMetrics(await usageMetrics.getReportedUsage());
         usageMetrics.reset();
       } catch (err) {
         logging.error(`Failed to report server usage metrics: ${err}`);
@@ -197,24 +230,29 @@ export class OutlineSharedMetricsPublisher implements SharedMetricsPublisher {
     return this.serverConfig.data().metricsEnabled || false;
   }
 
-  private async reportServerUsageMetrics(countryUsageMetrics: CountryUsage[]): Promise<void> {
+  private async reportServerUsageMetrics(locationUsageMetrics: ReportedUsage[]): Promise<void> {
     const reportEndTimestampMs = this.clock.now();
 
-    const userReports = [] as HourlyUserMetricsReportJson[];
-    for (const countryUsage of countryUsageMetrics) {
-      if (countryUsage.inboundBytes === 0) {
+    const userReports: HourlyUserMetricsReportJson[] = [];
+    for (const locationUsage of locationUsageMetrics) {
+      if (locationUsage.inboundBytes === 0 && locationUsage.tunnelTimeSec === 0) {
         continue;
       }
-      if (isSanctionedCountry(countryUsage.country)) {
+      if (isSanctionedCountry(locationUsage.country)) {
         continue;
       }
       // Make sure to always set a country, which is required by the metrics server validation.
       // It's used to differentiate the row from the legacy key usage rows.
-      const country = countryUsage.country || 'ZZ';
-      userReports.push({
-        bytesTransferred: countryUsage.inboundBytes,
+      const country = locationUsage.country || 'ZZ';
+      const report: HourlyUserMetricsReportJson = {
         countries: [country],
-      });
+        bytesTransferred: locationUsage.inboundBytes,
+        tunnelTimeSec: locationUsage.tunnelTimeSec,
+      };
+      if (locationUsage.asn) {
+        report.asn = locationUsage.asn;
+      }
+      userReports.push(report);
     }
     const report = {
       serverId: this.serverConfig.data().serverId,

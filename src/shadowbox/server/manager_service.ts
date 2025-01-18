@@ -75,10 +75,19 @@ interface RequestParams {
   //   method: string
   [param: string]: unknown;
 }
+
+// Type to reflect that we recive an untyped query string
+interface RequestQuery {
+  // Supported parameters:
+  //  since: string
+  [param: string]: unknown;
+}
+
 // Simplified request and response type interfaces containing only the
 // properties we actually use, to make testing easier.
 interface RequestType {
   params: RequestParams;
+  query?: RequestQuery;
 }
 interface ResponseType {
   send(code: number, data?: {}): void;
@@ -122,6 +131,7 @@ export function bindService(
 
   apiServer.put(`${apiPrefix}/name`, service.renameServer.bind(service));
   apiServer.get(`${apiPrefix}/server`, service.getServer.bind(service));
+  apiServer.get(`${apiPrefix}/experimental/server/metrics`, service.getServerMetrics.bind(service));
   apiServer.put(
     `${apiPrefix}/server/access-key-data-limit`,
     service.setDefaultDataLimit.bind(service)
@@ -161,11 +171,6 @@ export function bindService(
 
   // Experimental APIs.
 
-  apiServer.put(
-    `${apiPrefix}/experimental/asn-metrics/enabled`,
-    service.enableAsnMetrics.bind(service)
-  );
-
   // Redirect former experimental APIs
   apiServer.put(
     `${apiPrefix}/experimental/access-key-data-limit`,
@@ -183,6 +188,24 @@ function redirect(url: string): restify.RequestHandlerType {
     logging.debug(`Redirecting ${req.url} => ${url}`);
     res.redirect(308, url, next);
   };
+}
+
+export function convertTimeRangeToSeconds(timeRange: string): number {
+  const TIME_RANGE_UNIT_TO_SECONDS_MULTIPLYER = {
+    s: 1,
+    h: 60 * 60,
+    d: 24 * 60 * 60,
+    w: 7 * 24 * 60 * 60,
+  };
+
+  const timeRangeValue = Number(timeRange.slice(0, -1));
+  const timeRangeUnit = timeRange.slice(-1);
+
+  if (isNaN(timeRangeValue) || !TIME_RANGE_UNIT_TO_SECONDS_MULTIPLYER[timeRangeUnit]) {
+    throw new TypeError(`Invalid time range: ${timeRange}`);
+  }
+
+  return timeRangeValue * TIME_RANGE_UNIT_TO_SECONDS_MULTIPLYER[timeRangeUnit];
 }
 
 function validateAccessKeyId(accessKeyId: unknown): string {
@@ -604,6 +627,34 @@ export class ShadowsocksManagerService {
     }
   }
 
+  async getServerMetrics(req: RequestType, res: ResponseType, next: restify.Next) {
+    logging.debug(`getServerMetrics request ${JSON.stringify(req.params)}`);
+
+    let seconds;
+    try {
+      if (!req.query?.since) {
+        return next(
+          new restifyErrors.MissingParameterError({statusCode: 400}, 'Parameter `since` is missing')
+        );
+      }
+
+      seconds = convertTimeRangeToSeconds(req.query.since as string);
+    } catch (error) {
+      logging.error(error);
+      return next(new restifyErrors.InvalidArgumentError({statusCode: 400}, error.message));
+    }
+
+    try {
+      const response = await this.managerMetrics.getServerMetrics({seconds});
+      res.send(HttpSuccess.OK, response);
+      logging.debug(`getServerMetrics response ${JSON.stringify(response)}`);
+      return next();
+    } catch (error) {
+      logging.error(error);
+      return next(new restifyErrors.InternalServerError());
+    }
+  }
+
   getShareMetrics(req: RequestType, res: ResponseType, next: restify.Next): void {
     logging.debug(`getShareMetrics request ${JSON.stringify(req.params)}`);
     const response = {metricsEnabled: this.metricsPublisher.isSharingEnabled()};
@@ -637,38 +688,5 @@ export class ShadowsocksManagerService {
     }
     res.send(HttpSuccess.NO_CONTENT);
     next();
-  }
-
-  enableAsnMetrics(req: RequestType, res: ResponseType, next: restify.Next): void {
-    try {
-      logging.debug(`enableAsnMetrics request ${JSON.stringify(req.params)}`);
-      const asnMetricsEnabled = req.params.asnMetricsEnabled;
-      if (asnMetricsEnabled === undefined || asnMetricsEnabled === null) {
-        return next(
-          new restifyErrors.MissingParameterError(
-            {statusCode: 400},
-            'Parameter `asnMetricsEnabled` is missing'
-          )
-        );
-      } else if (typeof asnMetricsEnabled !== 'boolean') {
-        return next(
-          new restifyErrors.InvalidArgumentError(
-            {statusCode: 400},
-            'Parameter `asnMetricsEnabled` must be a boolean'
-          )
-        );
-      }
-      this.shadowsocksServer.enableAsnMetrics(asnMetricsEnabled);
-      if (this.serverConfig.data().experimental === undefined) {
-        this.serverConfig.data().experimental = {};
-      }
-      this.serverConfig.data().experimental.asnMetricsEnabled = asnMetricsEnabled;
-      this.serverConfig.write();
-      res.send(HttpSuccess.NO_CONTENT);
-      return next();
-    } catch (error) {
-      logging.error(error);
-      return next(new restifyErrors.InternalServerError());
-    }
   }
 }

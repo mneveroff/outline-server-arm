@@ -38,8 +38,6 @@ export class InMemoryFile implements TextFile {
 export class FakeShadowsocksServer implements ShadowsocksServer {
   private accessKeys: ShadowsocksAccessKey[] = [];
 
-  enableAsnMetrics(_: boolean) {}
-
   update(keys: ShadowsocksAccessKey[]) {
     this.accessKeys = keys;
     return Promise.resolve();
@@ -50,10 +48,8 @@ export class FakeShadowsocksServer implements ShadowsocksServer {
   }
 }
 
-export class FakePrometheusClient extends PrometheusClient {
-  constructor(public bytesTransferredById: {[accessKeyId: string]: number}) {
-    super('');
-  }
+export class FakePrometheusClient implements PrometheusClient {
+  constructor(public bytesTransferredById: {[accessKeyId: string]: number}) {}
 
   async query(_query: string): Promise<QueryResultData> {
     const queryResultData = {result: []} as QueryResultData;
@@ -61,7 +57,7 @@ export class FakePrometheusClient extends PrometheusClient {
       const bytesTransferred = this.bytesTransferredById[accessKeyId] || 0;
       queryResultData.result.push({
         metric: {access_key: accessKeyId},
-        value: [bytesTransferred, `${bytesTransferred}`],
+        value: [Date.now() / 1000, `${bytesTransferred}`],
       });
     }
     return queryResultData;

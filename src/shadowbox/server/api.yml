@@ -1,3 +1,17 @@
+# Copyright 2024 The Outline Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 openapi: 3.0.1
 info:
   title: Outline Server Management
@@ -113,7 +127,65 @@ paths:
       responses:
         '204':
           description: Access key limit deleted successfully.
-
+  /experimental/server/metrics:
+    get:
+      tags:
+        - Experimental
+      parameters:
+        - in: query
+          name: since
+          description: the range of time to return data for
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Display server metric information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        location:
+                          type: string
+                        asn:
+                          type: number
+                        asOrg:
+                          type: string
+                        tunnelTime:
+                          type: object
+                          properties:
+                            seconds: 
+                              type: number
+                        dataTransferred:
+                          type: object
+                          properties:
+                            bytes:
+                              type: number
+                  accessKeys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accessKeyId:
+                          type: string
+                        tunnelTime:
+                          type: object
+                          properties:
+                            seconds: 
+                              type: number
+                        dataTransferred:
+                          type: object
+                          properties:
+                            bytes: 
+                              type: number
+              examples:
+                '0':
+                  value: '{"server":[{"location":"US","asn":null,"asOrg":null,"tunnelTime":{"seconds":100},"dataTransferred":{"bytes":100}}],"accessKeys":[{"accessKeyId":"0","tunnelTime":{"seconds":100},"dataTransferred":{"bytes":100}}]}'
   /name:
     put:
       description: Renames the server
@@ -438,29 +510,6 @@ paths:
             examples:
               '0':
                 value: '{"metricsEnabled": true}'
-      responses:
-        '204':
-          description: Setting successful
-        '400':
-          description: Invalid request
-  /experimental/asn-metrics/enabled:
-    put:
-      description: Annotates Prometheus data metrics with autonomous system numbers (ASN).
-      tags:
-        - Server
-        - Experimental
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                asnMetricsEnabled:
-                  type: boolean
-            examples:
-              '0':
-                value: '{"asnMetricsEnabled": true}'
       responses:
         '204':
           description: Setting successful

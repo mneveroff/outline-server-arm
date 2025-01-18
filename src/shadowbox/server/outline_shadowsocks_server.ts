@@ -21,12 +21,26 @@ import * as file from '../infrastructure/file';
 import * as logging from '../infrastructure/logging';
 import {ShadowsocksAccessKey, ShadowsocksServer} from '../model/shadowsocks_server';
 
+/** Represents an outline-ss-server configuration with multiple services. */
+export interface OutlineSSServerConfig {
+  services: {
+    listeners: {
+      type: string;
+      address: string;
+    }[];
+    keys: {
+      id: string;
+      cipher: string;
+      secret: string;
+    }[];
+  }[];
+}
+
 // Runs outline-ss-server.
 export class OutlineShadowsocksServer implements ShadowsocksServer {
   private ssProcess: child_process.ChildProcess;
   private ipCountryFilename?: string;
   private ipAsnFilename?: string;
-  private isAsnMetricsEnabled = false;
   private isReplayProtectionEnabled = false;
 
   /**
@@ -60,18 +74,6 @@ export class OutlineShadowsocksServer implements ShadowsocksServer {
     return this;
   }
 
-  /** Annotates the Prometheus data metrics with ASN. */
-  enableAsnMetrics(enable: boolean) {
-    if (enable && !this.ipAsnFilename) {
-      throw new Error('Cannot enable ASN metrics: no ASN database filename set');
-    }
-    const valueChanged = this.isAsnMetricsEnabled != enable;
-    this.isAsnMetricsEnabled = enable;
-    if (valueChanged && this.ssProcess) {
-      this.ssProcess.kill('SIGTERM');
-    }
-  }
-
   enableReplayProtection(): OutlineShadowsocksServer {
     this.isReplayProtectionEnabled = true;
     return this;
@@ -93,22 +95,39 @@ export class OutlineShadowsocksServer implements ShadowsocksServer {
 
   private writeConfigFile(keys: ShadowsocksAccessKey[]): Promise<void> {
     return new Promise((resolve, reject) => {
-      const keysJson = {keys: [] as ShadowsocksAccessKey[]};
-      for (const key of keys) {
+      const validKeys: ShadowsocksAccessKey[] = keys.filter((key) => {
         if (!isAeadCipher(key.cipher)) {
           logging.error(
             `Cipher ${key.cipher} for access key ${key.id} is not supported: use an AEAD cipher instead.`
           );
-          continue;
+          return false;
         }
+        return true;
+      });
 
-        keysJson.keys.push(key);
+      const config: OutlineSSServerConfig = {services: []};
+      const keysByPort: Record<number, ShadowsocksAccessKey[]> = {};
+      for (const key of validKeys) {
+        (keysByPort[key.port] ??= []).push(key);
+      }
+      for (const port in keysByPort) {
+        const service = {
+          listeners: [
+            {type: 'tcp', address: `[::]:${port}`},
+            {type: 'udp', address: `[::]:${port}`},
+          ],
+          keys: keysByPort[port].map((key) => ({
+            id: key.id,
+            cipher: key.cipher,
+            secret: key.secret,
+          })),
+        };
+        config.services.push(service);
       }
 
       mkdirp.sync(path.dirname(this.configFilename));
-
       try {
-        file.atomicWriteFileSync(this.configFilename, jsyaml.safeDump(keysJson, {sortKeys: true}));
+        file.atomicWriteFileSync(this.configFilename, jsyaml.safeDump(config, {sortKeys: true}));
         resolve();
       } catch (error) {
         reject(error);
@@ -121,7 +140,7 @@ export class OutlineShadowsocksServer implements ShadowsocksServer {
     if (this.ipCountryFilename) {
       commandArguments.push('-ip_country_db', this.ipCountryFilename);
     }
-    if (this.isAsnMetricsEnabled && this.ipAsnFilename) {
+    if (this.ipAsnFilename) {
       commandArguments.push('-ip_asn_db', this.ipAsnFilename);
     }
     if (this.verbose) {
